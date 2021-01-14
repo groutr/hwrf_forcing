@@ -185,24 +185,37 @@ class Filename:
         """
         return self.date + datetime.timedelta(hours=self.fhour)
 
-# The Forecast class could possibly provide a much nicer
-# solution to aligning the cycles and forecast hours
-# A future version of this would groupby real_date(),
-# merging between any instances that collide on the same date.
-@dataclass(frozen=True, order=True)
-class Forecast:
-    date: datetime.datetime
-    hour: int
 
-    def __hash__(self):
-        return hash(self.real_date())
+class DFlowNCWriter:
+    def __init__(self, filename, compress=True):
+        self.filename = filename
+        self._handle = Dataset(filename, 'w')
+        self.compress = compress
+
+    def create_dimension(self, name, size, dtype, attrs):
+        assert self._handle.isopen()
+        self._handle.createDimension(name, size)
+        self._handle.createVariable(name, dtype, dimensions=(name,), zlib=self.compress)
+        self._handle.setncatts(attrs)
+
+    def create_variable(self, name, dtype, dims, attrs):
+        assert self._handle.isopen()
+        v = self._handle.createVariable(name, dtype, dimensions=dims, zlib=self.compress)
+        v.setncatts(attrs)
 
     @property
-    def cycle(self):
-        return self.date.hour
+    def variables(self):
+        assert self._handle.isopen()
+        return self._handle.variables
 
-    def real_date(self):
-        return self.date + datetime.timedelta(hours=self.hour)
+    @property
+    def dimensions(self):
+        assert self._handle.isopen()
+        return self._handle.dimensions
+
+    def close(self):
+        if self._handle.isopen():
+            self._handle.close()
 
 
 def copy_grib(files:Iterator, suffix:str='.new') -> list:
@@ -508,6 +521,10 @@ def export_dflow_nc(export_path, date, rv, transform, layers, compress=True):
 
     nc.close()
 
+def get_lons_lats(transform, shape):
+    lons = rasterio.transform.xy(transform, range(rv.shape[2]), [0] * rv.shape[2])
+    lats = rasterio.transform.xy(transform, [0] * rv.shape[1], range(rv.shape[1]))
+    return np.asarray(longitude[0]), np.asarray(latitude[1])
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -540,7 +557,13 @@ def main2(args):
 
     BUFFER = deque()
     overlap_counter = 0
-    for ts in sorted(time_steps.keys()):
+
+    sorted_times = sorted(time_steps.keys())
+    NCFILE = DFlowNCWriter(args.output_dir.joinpath(args.storm + ".nc"))
+    NCFile.create_dimension("time", None, 'i4', ATTRS['time'])
+    ref_time = "days since 1990-01-01 00:00:00"
+
+    for idx, ts in enumerate(sorted_times):
         print("Processing timestep:", ts)
         # merge
         print("Merging...")
@@ -571,10 +594,26 @@ def main2(args):
         else:
             overlap_counter = 0
 
-        # Write outputs
         rv, transform, layers = BUFFER.popleft()
-        _layers = [v["GRIB_ELEMENT"] for v in layers.values()]
-        export_dflow_nc(args.output_path, ts, rv, transform, _layers)
+        # Write outputs
+        if idx == 0:
+            NCFile.create_dimension("x", rv.shape[2], 'f8', ATTRS["longitude"])
+            NCFile.create_dimension("y", rv.shape[1], 'f8', ATTRS["latitude"])
+            NCFile.setncattr("transform", np.asarray(transform.to_gdal()))
+            NCFile.variables["longitude"][:] = np.linspace(BOUNDS[0], BOUNDS[2], n=rv.shape[2])
+            NCFile.variables["latitude"][:] = np.linspace(BOUNDS[1], BOUNDS[3], n=rv.shape[1])
+
+            for layer in (v["GRIB_ELEMENT"] for v in layers.values()):
+                vto = NC_VARS[layer]
+                NCFile.create_variable(vto, 'f4', dimensions=("time", "latitude", "longitude"), ATTRS[layer])
+
+        NCFile.variables["time"][idx] = date2num(ts, ref_time, calendar='julian')
+        for il, layer in enumerate(v["GRIB_ELEMENT"] for v in layers.values()):
+            vto = NC_VARS[layer]
+            NCFile.variables[vto][idx, ...] = rv[il]
+
+
+        #export_dflow_nc(args.output_path, ts, rv, transform, _layers)
         assert len(BUFFER) == 0
 
 
