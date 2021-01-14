@@ -447,7 +447,6 @@ def _merge_layers(res_levels, res=None, indices=None):
             Order follows order of variables in dataset or order given in indices if specified.
         t: transform for merged dataset
     """
-    print("Merging", res_levels, indices)
     nodata_vals = [d.nodata for d in res_levels]
 
     rv, t = merge.merge(res_levels,
@@ -477,6 +476,7 @@ def export_dflow_nc(export_path, date, rv, transform, layers, compress=True):
     """
     filename = f"{date.strftime('%Y%m%d%H')}_LDASIN"
     efn = pathlib.Path(export_path, filename)
+    print("Writing output to:", efn)
     nc = Dataset(str(efn), "w")
 
     # Dimensions
@@ -544,7 +544,7 @@ def main2(args):
         print("Processing timestep:", ts)
         # merge
         print("Merging...")
-        for t in time_steps[ts]:
+        for t in sorted(time_steps[ts], key=lambda x: x[0].date):
             res = min(_x.res for _x in t)
             ds_files = [_x.filename for _x in t]
             with rasterio.open(ds_files[0]) as ds:
@@ -574,7 +574,7 @@ def main2(args):
         # Write outputs
         rv, transform, layers = BUFFER.popleft()
         _layers = [v["GRIB_ELEMENT"] for v in layers.values()]
-        export_dflow_nc('.', TS[1].fdate(), rv, transform, _layers)
+        export_dflow_nc(args.output_path, ts, rv, transform, _layers)
         assert len(BUFFER) == 0
 
 
