@@ -604,7 +604,7 @@ def main2(args):
         if idx == 0:
             NCFile.create_dimension("longitude", rv.shape[2], 'f8', ATTRS["longitude"])
             NCFile.create_dimension("latitude", rv.shape[1], 'f8', ATTRS["latitude"])
-            NCFile.setncattr("transform", np.asarray(transform.to_gdal()))
+            NCFile._handle.setncattr("transform", np.asarray(transform.to_gdal()))
             NCFile.variables["longitude"][:] = np.linspace(BOUNDS[0], BOUNDS[2], rv.shape[2])
             NCFile.variables["latitude"][:] = np.linspace(BOUNDS[1], BOUNDS[3], rv.shape[1])
 
