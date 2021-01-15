@@ -558,12 +558,11 @@ def main2(args):
     BUFFER = deque()
     overlap_counter = 0
 
-    sorted_times = sorted(time_steps.keys())
-    NCFILE = DFlowNCWriter(args.output_dir.joinpath(args.storm + ".nc"))
+    NCFILE = DFlowNCWriter(args.output_path.joinpath(args.storm + ".nc"), compress=True)
     NCFile.create_dimension("time", None, 'i4', ATTRS['time'])
     ref_time = "days since 1990-01-01 00:00:00"
 
-    for idx, ts in enumerate(sorted_times):
+    for idx, ts in enumerate(sorted(time_steps.keys())):
         print("Processing timestep:", ts)
         # merge
         print("Merging...")
@@ -603,15 +602,15 @@ def main2(args):
         rv, transform, layers = BUFFER.popleft()
         # Write outputs
         if idx == 0:
-            NCFile.create_dimension("x", rv.shape[2], 'f8', ATTRS["longitude"])
-            NCFile.create_dimension("y", rv.shape[1], 'f8', ATTRS["latitude"])
+            NCFile.create_dimension("longitude", rv.shape[2], 'f8', ATTRS["longitude"])
+            NCFile.create_dimension("latitude", rv.shape[1], 'f8', ATTRS["latitude"])
             NCFile.setncattr("transform", np.asarray(transform.to_gdal()))
-            NCFile.variables["longitude"][:] = np.linspace(BOUNDS[0], BOUNDS[2], n=rv.shape[2])
-            NCFile.variables["latitude"][:] = np.linspace(BOUNDS[1], BOUNDS[3], n=rv.shape[1])
+            NCFile.variables["longitude"][:] = np.linspace(BOUNDS[0], BOUNDS[2], rv.shape[2])
+            NCFile.variables["latitude"][:] = np.linspace(BOUNDS[1], BOUNDS[3], rv.shape[1])
 
             for layer in (v["GRIB_ELEMENT"] for v in layers.values()):
                 vto = NC_VARS[layer]
-                NCFile.create_variable(vto, 'f4', dimensions=("time", "latitude", "longitude"), ATTRS[layer])
+                NCFile.create_variable(vto, 'f4', ("time", "latitude", "longitude"), ATTRS[layer])
 
         NCFile.variables["time"][idx] = date2num(ts, ref_time, calendar='julian')
         for il, layer in enumerate(v["GRIB_ELEMENT"] for v in layers.values()):
