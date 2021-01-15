@@ -558,7 +558,7 @@ def main2(args):
     BUFFER = deque()
     overlap_counter = 0
 
-    NCFILE = DFlowNCWriter(args.output_path.joinpath(args.storm + ".nc"), compress=True)
+    NCFile = DFlowNCWriter(args.output_path.joinpath(args.storm + ".nc"), compress=True)
     NCFile.create_dimension("time", None, 'i4', ATTRS['time'])
     ref_time = "days since 1990-01-01 00:00:00"
 
