@@ -585,8 +585,14 @@ def main2(args):
                 weight = args.ramp_weights[overlap_counter]
                 X1 = BUFFER.popleft()
                 X2 = BUFFER.popleft()
-                data = X1[0] * (1-weight) + X2[0] * weight
-                BUFFER.appendleft((data, *X1[1:]))
+                print(f"Blending with weight of {1-weight}X1 + {weight}X2")
+                _x1 = X1[0]
+                _x2 = X2[0]
+                # Do (1-weight) * X1 + weight * X2 without intermediate arrays
+                np.multiply(_x1, (1-weight), _x1)
+                np.multiply(_x2, weight, _x2)
+                np.add(_x1, _x2, _x1)
+                BUFFER.appendleft((_x1, *X1[1:]))
             except IndexError:
                 print("Insufficient number of weights given. Need at least", overlap_counter + 1)
                 raise
