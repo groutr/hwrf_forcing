@@ -464,7 +464,7 @@ def _merge_layers(res_levels, res=None, indices=None):
 
     rv, t = merge.merge(res_levels,
                         bounds=BOUNDS,
-                        nodata=np.nan,
+                        nodata=-9999,
                         precision=20,
                         res=res,
                         resampling=Resampling.bilinear)
@@ -545,7 +545,7 @@ def get_args():
             raise ValueError(f"For {args.fhours} hours and an offset of {args.ramp_offset}, {overlap} weights are needed")
     return args
 
-def main2(args):
+def main(args):
     input_files = copy_grib(args.path.glob('*.hwrfprs.*.grb2'))
     storm_data = discover_directory(args.path, glob="*.hwrfprs.*.grb2.new")
 
@@ -622,67 +622,9 @@ def main2(args):
         assert len(BUFFER) == 0
 
 
-def main(args):
-    # Copy files (reducing file sizes and making compatible with GDAL 3.1)
-    #storm = Storm(args.path, args.storm, args.date, args.cycle_delta, args.fhours)
-
-    input_files = copy_grib(args.path.glob('*.hwrfprs.*.grb2'))
-    storm_data = discover_directory(args.path, glob="*.hwrfprs.*.grb2.new")
-
-    # Index the timesteps in the directory
-    time_steps = defaultdict(list)
-    for f in storm_data:
-        pf = [parse_filename(x) for x in f]
-        #time_steps[pf[0].fdate()].append(pf)
-        time_steps[(pf[0].fhour, pf[0].date)] = pf
-    i = sorted(time_steps.keys())
-    start = i[0][1]
-    delta = i[1][1] - start
-    end = i[-1][1]
-
-    BUFFER = deque()
-    overlap_counter = 0
-    for ts in cycle_counter(start, end, delta, args.fhours, args.ramp_offset):
-        print("Processing timestep:", ts)
-        # merge
-        print("Merging...")
-        for t in ts:
-            TS = time_steps[t]
-            res = min(_x.res for _x in TS)
-            ds_files = [_x.filename for _x in TS]
-            with rasterio.open(ds_files[0]) as ds:
-                indices = find_vars(ds)
-            X = merge_layers(ds_files, res=res, indices=list(indices.keys()))
-            print("Shape:", X[0].shape)
-            X += (indices,)  # add indices to tuple
-            BUFFER.append(X)
-
-        if len(ts) > 1:
-            # blend
-            print("Blending buffer...")
-            assert len(BUFFER) == 2
-            try:
-                weight = args.ramp_weights[overlap_counter]
-                X1 = BUFFER.popleft()
-                X2 = BUFFER.popleft()
-                data = X1[0] * (1-weight) + X2[0] * weight
-                BUFFER.appendleft((data, *X1[1:]))
-            except IndexError:
-                print("Insufficient number of weights given. Need at least", overlap_counter + 1)
-                raise
-            overlap_counter += 1
-        else:
-            overlap_counter = 0
-
-        # Write outputs
-        rv, transform, layers = BUFFER.popleft()
-        _layers = [v["GRIB_ELEMENT"] for v in layers.values()]
-        export_dflow_nc('.', TS[1].fdate(), rv, transform, _layers)
-        assert len(BUFFER) == 0
-
 
 
 if __name__ == "__main__":
     logging.basicConfig()
     args = get_args()
-    main2(args)
+    main(args)
