@@ -110,11 +110,11 @@ class DFlowNCWriter:
         self._handle = Dataset(filename, 'w')
         self.compress = compress
 
-    def create_dimension(self, name, size, dtype, attrs):
+    def create_coordinate(self, name, size, dtype, attrs):
         assert self._handle.isopen()
         self._handle.createDimension(name, size)
-        self._handle.createVariable(name, dtype, dimensions=(name,), zlib=self.compress)
-        self._handle.setncatts(attrs)
+        v = self._handle.createVariable(name, dtype, dimensions=(name,), zlib=self.compress)
+        v.setncatts(attrs)
 
     def create_variable(self, name, dtype, dims, attrs):
         assert self._handle.isopen()
@@ -477,8 +477,8 @@ def main(args):
     overlap_counter = 0
 
     NCFile = DFlowNCWriter(args.output_path.joinpath(args.storm + ".nc"), compress=True)
-    NCFile.create_dimension("time", None, 'i4', ATTRS['time'])
-    ref_time = "days since 1990-01-01 00:00:00"
+    NCFile.create_coordinate("time", None, 'i4', ATTRS['time'])
+    ref_time = ATTRS['time']['units']
 
     for idx, ts in enumerate(sorted(time_steps.keys())):
         print("Processing timestep:", ts)
@@ -520,8 +520,8 @@ def main(args):
         rv, transform, layers = BUFFER.popleft()
         # Write outputs
         if idx == 0:
-            NCFile.create_dimension("longitude", rv.shape[2], 'f8', ATTRS["longitude"])
-            NCFile.create_dimension("latitude", rv.shape[1], 'f8', ATTRS["latitude"])
+            NCFile.create_coordinate("longitude", rv.shape[2], 'f8', ATTRS["longitude"])
+            NCFile.create_coordinate("latitude", rv.shape[1], 'f8', ATTRS["latitude"])
             NCFile._handle.setncattr("transform", np.asarray(transform.to_gdal()))
             NCFile.variables["longitude"][:] = np.linspace(BOUNDS[0], BOUNDS[2], rv.shape[2])
             NCFile.variables["latitude"][:] = np.linspace(BOUNDS[1], BOUNDS[3], rv.shape[1])
