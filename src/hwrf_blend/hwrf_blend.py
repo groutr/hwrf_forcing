@@ -23,19 +23,97 @@ BOUNDS = (-102, 20, -58, 48)
 RES_LEVELS = ('core', 'storm', 'synoptic')
 FNAME_RE = re.compile(rf"(?P<storm>\w+?)\.(?P<date>\d{{10}})\.hwrfprs\.(?P<level>{'|'.join(RES_LEVELS)})\.(?P<res>\d+?p\d+?)\.f(?P<fhour>\d+?)\.grb2.*?", flags=re.ASCII)
 
+FILL_VALUE = 2147483647.0
 ATTRS = {
-    "UGRD": {"units": "m s-1", "field": "U, scalar, series", "long_name": "eastward_wind"},
-    "VGRD": {"units": "m s-1", "field": "V, scalar, series", "long_name": "northward_wind"},
-    "PRMSL": {"units": "Pa", "field": "P, scalar, series", "long_name": "Pressure Reduced to MSL"},
-    "time": {"axis": "T", "conventions": "relative julian days with decimal part (as parts of the day)", "field": "time, scalar, series", "units": "days since 1990-01-01 00:00:00", "long_name": "julian day (UT)"},
-    "longitude": {"long_name": "longitude", "units": "degree_east", "field": "lon, scalar, series"},
-    "latitude": {"long_name": "latitude", "units": "degree_north", "field": "lat, scalar, series"},
-    "TMP": {"units": "K", "field": "TMP_2aboveground, scalar, series", "long_name": "Temperature 2m above ground"},
-    "SPFH": {"units": "kg/hg", "field": "SPFH_2maboveground, scalar, series", "long_name": "Specific Humidity 2m above ground"},
-    "PRATE": {"units": "kg/m^2/s", "field": "PRATE_surface, scalar, series", "long_name": "Precipitation Rate at surface"},
-    "DLWRF": {"units": "W/m^2", "field": "DLWRF_surface, scalar, series", "long_name": "Downward Long-Wave Rad. Flux"},
-    "DSWRF": {"units": "W/m^2", "field": "DSWRF_surface, scalar, series", "long_name": "Downward Short-Wave Radiation Flux"},
-    "PRES": {"units": "Pa", "field": "PRES_surface, scalar, series", "long_name": "Pressure at surface"}
+    "UGRD": {"name": "eastward_wind",
+        "standard_name": "eastward_wind",
+        "short_name": "u10",
+        "level": "10 m above ground",
+        "units": "m s-1",
+        "field": "U, scalar, series",
+        "long_name": "U wind component",
+        "_FillValue": FILL_VALUE},
+    "VGRD": {"units": "m s-1",
+        "field": "V, scalar, series",
+        "long_name": "V wind component",
+        "name": "northward_wind",
+        "standard_name": "northward_wind",
+        "short_name": "v10",
+        "level": "10 m above ground",
+        "_FillValue": FILL_VALUE},
+    "PRMSL": {"units": "Pa",
+        "field": "P, scalar, series",
+        "long_name": "Pressure Reduced to MSL",
+        "name": "air_pressure",
+        "standard_name": "air_pressure",
+        "short_name": "msl",
+        "level": "Mean sea level",
+        "_FillValue": FILL_VALUE},
+    "time": {"axis": "T",
+        "conventions": "relative julian days with decimal part (as parts of the day)",
+        "field": "time, scalar, series",
+        "units": "days since 1990-01-01 00:00:00",
+        "long_name": "julian day (UT)"},
+    "longitude": {"short_name": "long",
+        "standard_name": "longitude",
+        "name": "longitude",
+        "long_name": "longitude",
+        "units": "degree_east",
+        "field": "lon, scalar, series"},
+    "latitude": {"long_name": "latitude",
+        "short_name": "lat",
+        "name": "latitude",
+        "standard_name": "latitude",
+        "units": "degree_north",
+        "field": "lat, scalar, series"},
+    "TMP": {"units": "K",
+        "field": "TMP_2aboveground, scalar, series",
+        "long_name": "2-meter air temperature",
+        "name": "air_temperature",
+        "standard_name": "air_temperature",
+        "short_name": "T2D",
+        "level": "2 m above ground",
+        "_FillValue": FILL_VALUE},
+    "SPFH": {"units": "kg/hg",
+        "field": "SPFH_2maboveground, scalar, series",
+        "long_name": "Specific humidity, dimensionless ratio of the mass of water vapor to the total mass of the system",
+        "name": "specific_humidity",
+        "standard_name": "specific_humidity",
+        "short_name": "Q2D",
+        "level": "2 m above ground",
+        "_FillValue": FILL_VALUE},
+    "PRATE": {"name": "rainfall",
+        "standard_name": "rainfall_rate",
+        "short_name": "PRATE",
+        "level": "Surface",
+        "units": "kg/m^2/s",
+        "field": "PRATE_surface, scalar, series",
+        "long_name": "Precipitation Rate at surface",
+        "_FillValue": FILL_VALUE},
+    "DLWRF": {"units": "W/m^2",
+            "field": "DLWRF_surface, scalar, series",
+            "long_name": "Surface downward long-wave radiation flux",
+            "name": "surface_downward_longwave_flux",
+            "standard_name": "surface_downward_longwave_flux",
+            "short_name": "LWDOWN",
+            "level": "Surface",
+            "_FillValue": FILL_VALUE},
+    "DSWRF": {"units": "W/m^2",
+            "field": "DSWRF_surface, scalar, series",
+            "long_name": "Surface downward short-wave radiation flux",
+            "name": "surface_downward_shortwave_flux",
+            "standard_name": "surface_downward_shortwave_flux",
+            "short_name": "SWDOWN",
+            "level": "Surface",
+            "_FillValue": FILL_VALUE},
+    "PRES": {"units": "Pa",
+            "field": "PRES_surface, scalar, series",
+            "long_name": "Surface pressure",
+            "name": "surface_air_pressure",
+            "standard_name": "surface_air_pressure",
+            "short_name": "psfc",
+            "level": "Surface",
+            "_FillValue": FILL_VALUE}
 }
 
 GRIB_COPY = ['grib_copy', '-w', 'typeOfLevel=surface/meanSea/heightAboveGround,shortName=prmsl/10u/10v/sp/2sh/prate/2d/tcc/dlwrf/dswrf/2t,level=2/10/0']
@@ -382,15 +460,15 @@ def _merge_layers(res_levels, res=None, indices=None):
 
     rv, t = merge.merge(res_levels,
                         bounds=BOUNDS,
-                        nodata=-9999,
-                        precision=20,
+                        nodata=np.nan,
+                        precision=50,
                         res=res,
                         resampling=Resampling.bilinear)
     # handle possibly different no_data values
     for i, nd in enumerate(nodata_vals):
         if nd is not None:
-            mask = rv[i] == nd
-            rv[i, mask] = np.nan
+            mask = rv == nd
+            rv[mask] = np.nan
 
     return rv, t
 
@@ -439,10 +517,13 @@ def export_dflow_nc(export_path, date, rv, transform, layers, compress=True):
 
     nc.close()
 
+def linear_blend(length):
+    return np.linspace(0, 1, length+2)[1:-1]
+
 def get_lons_lats(transform, shape):
-    lons = rasterio.transform.xy(transform, range(rv.shape[2]), [0] * rv.shape[2])
-    lats = rasterio.transform.xy(transform, [0] * rv.shape[1], range(rv.shape[1]))
-    return np.asarray(longitude[0]), np.asarray(latitude[1])
+    lons = rasterio.transform.xy(transform, range(shape[2]), [0] * shape[2])
+    lats = rasterio.transform.xy(transform, [0] * shape[1], range(shape[1]))
+    return np.asarray(lons[0]), np.asarray(lats[1])
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -450,17 +531,10 @@ def get_args():
     parser.add_argument('output_path', type=pathlib.Path, help='Directory to store processed files')
     parser.add_argument('--storm', required=False, help="only process a particular storm")
     parser.add_argument('--ramp-weights', help="comma delimted sequence of weights for blending between cycles")
-    parser.add_argument('--cycle-delta', required=True, type=int, help="Range of cycles to consider")
-    parser.add_argument('--fhours', required=True, type=int, help="Number of hours in each cycle")
-    parser.add_argument('--ramp-offset', type=int, help="At which hour each cycle to start ramp")
     args = parser.parse_args()
 
     # Basic validation for ramp-weights
-    if args.ramp_offset is not None and args.ramp_weights is not None:
-        overlap = args.fhours - args.ramp_offset + 1
-        args.ramp_weights = np.array(args.ramp_weights.split(','), dtype=float)
-        if len(args.ramp_weights) != overlap:
-            raise ValueError(f"For {args.fhours} hours and an offset of {args.ramp_offset}, {overlap} weights are needed")
+    args.ramp_weights = np.array(args.ramp_weights.split(','), dtype=float)
     return args
 
 def main(args):
@@ -477,7 +551,7 @@ def main(args):
     overlap_counter = 0
 
     NCFile = DFlowNCWriter(args.output_path.joinpath(args.storm + ".nc"), compress=True)
-    NCFile.create_coordinate("time", None, 'i4', ATTRS['time'])
+    NCFile.create_coordinate("time", None, 'f8', ATTRS['time'])
     ref_time = ATTRS['time']['units']
 
     for idx, ts in enumerate(sorted(time_steps.keys())):
@@ -523,12 +597,15 @@ def main(args):
             NCFile.create_coordinate("longitude", rv.shape[2], 'f8', ATTRS["longitude"])
             NCFile.create_coordinate("latitude", rv.shape[1], 'f8', ATTRS["latitude"])
             NCFile._handle.setncattr("transform", np.asarray(transform.to_gdal()))
-            NCFile.variables["longitude"][:] = np.linspace(BOUNDS[0], BOUNDS[2], rv.shape[2])
-            NCFile.variables["latitude"][:] = np.linspace(BOUNDS[1], BOUNDS[3], rv.shape[1])
+            lons, lats = get_lons_lats(transform, rv.shape)
+            NCFile.variables["longitude"][:] = lons
+            NCFile.variables["latitude"][:] = lats
+            #NCFile.variables["longitude"][:] = np.linspace(BOUNDS[0], BOUNDS[2], rv.shape[2])
+            #NCFile.variables["latitude"][:] = np.linspace(BOUNDS[1], BOUNDS[3], rv.shape[1])
 
             for layer in (v["GRIB_ELEMENT"] for v in layers.values()):
                 vto = NC_VARS[layer]
-                NCFile.create_variable(vto, 'f4', ("time", "latitude", "longitude"), ATTRS[layer])
+                NCFile.create_variable(vto, 'f8', ("time", "latitude", "longitude"), ATTRS[layer])
 
         NCFile.variables["time"][idx] = date2num(ts, ref_time, calendar='julian')
         for il, layer in enumerate(v["GRIB_ELEMENT"] for v in layers.values()):
@@ -536,10 +613,7 @@ def main(args):
             NCFile.variables[vto][idx, ...] = rv[il]
 
 
-        #export_dflow_nc(args.output_path, ts, rv, transform, _layers)
         assert len(BUFFER) == 0
-
-
 
 
 if __name__ == "__main__":
