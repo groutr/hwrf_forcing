@@ -521,8 +521,8 @@ def linear_blend(length):
     return np.linspace(0, 1, length+2)[1:-1]
 
 def get_lons_lats(transform, shape):
-    lons = rasterio.transform.xy(transform, range(shape[2]), [0] * shape[2])
-    lats = rasterio.transform.xy(transform, [0] * shape[1], range(shape[1]))
+    lats = rasterio.transform.xy(transform, range(shape[1]), [0] * shape[1])
+    lons = rasterio.transform.xy(transform, [0] * shape[2], range(shape[2]))
     return np.asarray(lons[0]), np.asarray(lats[1])
 
 def get_args():
