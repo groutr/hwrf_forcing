@@ -23,7 +23,7 @@ BOUNDS = (-102, 20, -58, 48)
 RES_LEVELS = ('core', 'storm', 'synoptic')
 FNAME_RE = re.compile(rf"(?P<storm>\w+?)\.(?P<date>\d{{10}})\.hwrfprs\.(?P<level>{'|'.join(RES_LEVELS)})\.(?P<res>\d+?p\d+?)\.f(?P<fhour>\d+?)\.grb2.*?", flags=re.ASCII)
 
-FILL_VALUE = 2147483647.0
+FILL_VALUE = np.float32(2147483647)
 ATTRS = {
     "UGRD": {"name": "eastward_wind",
         "standard_name": "eastward_wind",
@@ -66,7 +66,7 @@ ATTRS = {
         "standard_name": "latitude",
         "units": "degree_north",
         "field": "lat, scalar, series"},
-    "TMP": {"units": "K",
+    "TMP": {"units": "C",
         "field": "TMP_2aboveground, scalar, series",
         "long_name": "2-meter air temperature",
         "name": "air_temperature",
@@ -116,7 +116,7 @@ ATTRS = {
             "_FillValue": FILL_VALUE}
 }
 
-GRIB_COPY = ['grib_copy', '-w', 'typeOfLevel=surface/meanSea/heightAboveGround,shortName=prmsl/10u/10v/sp/2sh/prate/2d/tcc/dlwrf/dswrf/2t,level=2/10/0']
+GRIB_COPY = ['grib_copy', '-w', 'shortName=prmsl/10u/10v/sp/2sh/prate/2d/tcc/dlwrf/dswrf/2t,typeOfLevel=surface/meanSea/heightAboveGround,level=0/2/10']
 
 PATTERNS = [{"GRIB_ELEMENT": "TMP", "GRIB_SHORT_NAME": "2-HTGL", "GRIB_PDS_PDTN": "0"},
             {"GRIB_ELEMENT": "PRMSL", "GRIB_SHORT_NAME": "0-MSL", "GRIB_PDS_PDTN": "0"},
@@ -463,6 +463,7 @@ def _merge_layers(res_levels, res=None, indices=None):
                         nodata=np.nan,
                         precision=50,
                         res=res,
+                        indexes=indices,
                         resampling=Resampling.bilinear)
     # handle possibly different no_data values
     for i, nd in enumerate(nodata_vals):
@@ -594,8 +595,8 @@ def main(args):
         rv, transform, layers = BUFFER.popleft()
         # Write outputs
         if idx == 0:
-            NCFile.create_coordinate("longitude", rv.shape[2], 'f8', ATTRS["longitude"])
-            NCFile.create_coordinate("latitude", rv.shape[1], 'f8', ATTRS["latitude"])
+            NCFile.create_coordinate("longitude", rv.shape[2], 'f4', ATTRS["longitude"])
+            NCFile.create_coordinate("latitude", rv.shape[1], 'f4', ATTRS["latitude"])
             NCFile._handle.setncattr("transform", np.asarray(transform.to_gdal()))
             lons, lats = get_lons_lats(transform, rv.shape)
             NCFile.variables["longitude"][:] = lons
@@ -605,7 +606,7 @@ def main(args):
 
             for layer in (v["GRIB_ELEMENT"] for v in layers.values()):
                 vto = NC_VARS[layer]
-                NCFile.create_variable(vto, 'f8', ("time", "latitude", "longitude"), ATTRS[layer])
+                NCFile.create_variable(vto, 'f4', ("time", "latitude", "longitude"), ATTRS[layer])
 
         NCFile.variables["time"][idx] = date2num(ts, ref_time, calendar='julian')
         for il, layer in enumerate(v["GRIB_ELEMENT"] for v in layers.values()):
