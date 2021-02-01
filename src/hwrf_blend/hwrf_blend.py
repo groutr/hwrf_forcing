@@ -66,7 +66,7 @@ ATTRS = {
         "standard_name": "latitude",
         "units": "degree_north",
         "field": "lat, scalar, series"},
-    "TMP": {"units": "C",
+    "TMP": {"units": "K",
         "field": "TMP_2aboveground, scalar, series",
         "long_name": "2-meter air temperature",
         "name": "air_temperature",
@@ -74,7 +74,7 @@ ATTRS = {
         "short_name": "T2D",
         "level": "2 m above ground",
         "_FillValue": FILL_VALUE},
-    "SPFH": {"units": "kg/hg",
+    "SPFH": {"units": "kg/kg",
         "field": "SPFH_2maboveground, scalar, series",
         "long_name": "Specific humidity, dimensionless ratio of the mass of water vapor to the total mass of the system",
         "name": "specific_humidity",
@@ -86,7 +86,7 @@ ATTRS = {
         "standard_name": "rainfall_rate",
         "short_name": "PRATE",
         "level": "Surface",
-        "units": "kg/m^2/s",
+        "units": "mm/s",
         "field": "PRATE_surface, scalar, series",
         "long_name": "Precipitation Rate at surface",
         "_FillValue": FILL_VALUE},
@@ -334,10 +334,12 @@ def find_vars(ds):
     for v in range(1, ds.count+1):
         var = match_case(ds.tags(v), PATTERNS)
         if var:
-            indices[v] = var
+            indices[v] = ds.tags(v)
     return indices
 
-
+def celsius_to_kelvin(arr):
+    """Convert Celsius temps to Kelvin"""
+    return arr + 273.15
 
 def merge_layers(res_levels, res=None, indices=None):
     ds_readers = [isinstance(rl, rasterio.DatasetReader) for rl in res_levels]
@@ -523,8 +525,11 @@ def main(args):
                 NCFile.create_variable(vto, 'f4', ("time", "latitude", "longitude"), ATTRS[layer])
 
         NCFile.variables["time"][idx] = date2num(ts, ref_time, calendar='julian')
-        for il, layer in enumerate(v["GRIB_ELEMENT"] for v in layers.values()):
-            vto = NC_VARS[layer]
+        for il, layer in enumerate(layers.values()):
+            element = layer["GRIB_ELEMENT"]
+            vto = NC_VARS[element]
+            if layer["GRIB_UNIT"] == "[C]" and ATTRS[element]["units"] == "K":
+                rv[il] = celsius_to_kelvin(rv[il])
             NCFile.variables[vto][idx, ...] = rv[il]
 
 
