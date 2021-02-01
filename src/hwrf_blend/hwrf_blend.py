@@ -461,6 +461,7 @@ def _merge_layers(res_levels, res=None, indices=None):
     rv, t = merge.merge(res_levels,
                         bounds=BOUNDS,
                         nodata=np.nan,
+                        dtype='float32',
                         precision=50,
                         res=res,
                         indexes=indices,
