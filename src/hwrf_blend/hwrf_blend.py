@@ -14,12 +14,13 @@ import subprocess
 
 import rasterio
 from rasterio.enums import Resampling
-from rasterio import merge
+#from rasterio import merge
+import merge
 import numpy as np
 from netCDF4 import Dataset, num2date, date2num
 from tlz import pluck, groupby
 
-BOUNDS = (-102, 20, -58, 48)
+DEFAULT_BOUNDS = "-102 20 -58 48"
 RES_LEVELS = ('core', 'storm', 'synoptic')
 FNAME_RE = re.compile(rf"(?P<storm>\w+?)\.(?P<date>\d{{10}})\.hwrfprs\.(?P<level>{'|'.join(RES_LEVELS)})\.(?P<res>\d+?p\d+?)\.f(?P<fhour>\d+?)\.grb2.*?", flags=re.ASCII)
 
@@ -341,13 +342,13 @@ def celsius_to_kelvin(arr):
     """Convert Celsius temps to Kelvin"""
     return arr + 273.15
 
-def merge_layers(res_levels, res=None, indices=None):
+def merge_layers(res_levels, res=None, indices=None, **kwargs):
     ds_readers = [isinstance(rl, rasterio.DatasetReader) for rl in res_levels]
     if all(ds_readers):
-        X =_merge_layers(res_levels, res=res, indices=indices)
+        X =_merge_layers(res_levels, res=res, indices=indices, **kwargs)
     elif not any(ds_readers):
         _res_levels = [rasterio.open(rl) for rl in res_levels]
-        X = _merge_layers(_res_levels, res=res, indices=indices)
+        X = _merge_layers(_res_levels, res=res, indices=indices, **kwargs)
 
         # close objects
         for rl in _res_levels:
@@ -357,7 +358,7 @@ def merge_layers(res_levels, res=None, indices=None):
     return X
 
 
-def _merge_layers(res_levels, res=None, indices=None):
+def _merge_layers(res_levels, res=None, indices=None, **kwargs):
     """
     Merge layers together using Rasterio.
 
@@ -448,10 +449,13 @@ def get_args():
     parser.add_argument('output_path', type=pathlib.Path, help='Directory to store processed files')
     parser.add_argument('--storm', required=False, help="only process a particular storm")
     parser.add_argument('--ramp-weights', help="comma delimted sequence of weights for blending between cycles")
+    parser.add_argument('-b', '--bounds', default=DEFAULT_BOUNDS, help="boundary points (left,bottom,right,top)")
     args = parser.parse_args()
 
     # Basic validation for ramp-weights
     args.ramp_weights = np.array(args.ramp_weights.split(','), dtype=float)
+    global BOUNDS
+    BOUNDS = args.bounds = tuple(map(float, args.bounds.split()))
     return args
 
 def main(args):
@@ -470,6 +474,7 @@ def main(args):
     NCFile = DFlowNCWriter(args.output_path.joinpath(args.storm + ".nc"), compress=True)
     NCFile.create_coordinate("time", None, 'f8', ATTRS['time'])
     ref_time = ATTRS['time']['units']
+    indices=None
 
     for idx, ts in enumerate(sorted(time_steps.keys())):
         print("Processing timestep:", ts)
