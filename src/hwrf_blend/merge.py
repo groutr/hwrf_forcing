@@ -18,8 +18,14 @@ from rasterio.transform import Affine
 
 logger = logging.getLogger(__name__)
 
-MERGE_METHODS = ('first', 'last', 'min', 'max')
 
+def copy_first(old_data, new_data, old_nodata, new_nodata, **kwargs):
+    mask = np.empty_like(old_data, dtype='bool')
+    np.logical_not(new_nodata, out=mask)
+    np.logical_and(old_nodata, mask, out=mask)
+    np.copyto(old_data, new_data, where=mask)
+
+MERGE_METHODS = {'first': copy_first}
 
 def merge(
     datasets,
@@ -110,7 +116,11 @@ def merge(
                 Information for mapping pixel coordinates in `dest` to another
                 coordinate system
     """
-    if method not in MERGE_METHODS and not callable(method):
+    if method in MERGE_METHODS:
+        copyto = MERGE_METHODS[method]
+    elif callable(method):
+        copyto = method
+    else:
         raise ValueError('Unknown method {0}, must be one of {1} or callable'
                          .format(method, MERGE_METHODS))
 
@@ -131,6 +141,7 @@ def merge(
     with dataset_opener(datasets[0]) as first:
         first_profile = first.profile
         first_res = first.res
+        first_bounds = first.bounds
         nodataval = first.nodatavals[0]
         dt = first.dtypes[0]
 
@@ -154,17 +165,14 @@ def merge(
         dst_w, dst_s, dst_e, dst_n = bounds
     else:
         # scan input files
-        xs = []
-        ys = []
+        dst_w, dst_s, dst_e, dst_n = first_bounds
         for dataset in datasets:
             with dataset_opener(dataset) as src:
                 left, bottom, right, top = src.bounds
-            xs.extend([left, right])
-            ys.extend([bottom, top])
-        xs.sort()
-        ys.sort()
-        dst_w, dst_e = xs[0], xs[-1]
-        dst_s, dst_n = ys[0], ys[-1]
+            dst_w = min(dst_w, left)
+            dst_s = min(dst_s, bottom)
+            dst_e = max(dst_e, right)
+            dst_n = max(dst_n, top)
 
     logger.debug("Output bounds: %r", (dst_w, dst_s, dst_e, dst_n))
     output_transform = Affine.translation(dst_w, dst_n)
@@ -216,7 +224,7 @@ def merge(
                 fillval = nodataval
                 inrange = True
         elif np.issubdtype(dt, np.floating):
-            if np.isnan(nodataval):
+            if math.isnan(nodataval):
                 fillval = nodataval
                 inrange = True
             else:
@@ -236,39 +244,6 @@ def merge(
     # create destination array
     dest = np.full((output_count, output_height, output_width), fillval, dtype=dt)
 
-    if method == 'first':
-        def copyto(old_data, new_data, old_nodata, new_nodata, **kwargs):
-            mask = np.logical_not(new_nodata)
-            np.logical_and(old_nodata, mask, out=mask)
-            np.copyto(old_data, new_data, where=mask)
-
-    elif method == 'last':
-        def copyto(old_data, new_data, old_nodata, new_nodata, **kwargs):
-            mask = ~new_nodata
-            old_data[mask] = new_data[mask]
-
-    elif method == 'min':
-        def copyto(old_data, new_data, old_nodata, new_nodata, **kwargs):
-            mask = np.logical_and(~old_nodata, ~new_nodata)
-            old_data[mask] = np.minimum(old_data[mask], new_data[mask])
-
-            mask = np.logical_and(old_nodata, ~new_nodata)
-            old_data[mask] = new_data[mask]
-
-    elif method == 'max':
-        def copyto(old_data, new_data, old_nodata, new_nodata, **kwargs):
-            mask = np.logical_and(~old_nodata, ~new_nodata)
-            old_data[mask] = np.maximum(old_data[mask], new_data[mask])
-
-            mask = np.logical_and(old_nodata, ~new_nodata)
-            old_data[mask] = new_data[mask]
-
-    elif callable(method):
-        copyto = method
-
-    else:
-        raise ValueError(method)
-
     for idx, dataset in enumerate(datasets):
         with dataset_opener(dataset) as src:
             # Real World (tm) use of boundless reads.
@@ -276,7 +251,7 @@ def merge(
             # problem. Making it more efficient is a TODO.
 
             # 1. Compute spatial intersection of destination and source
-            src_w, src_s, src_e, src_n = (round(x, precision) for x in src.bounds)
+            src_w, src_s, src_e, src_n = src.bounds
 
             int_w = max(src_w, dst_w)
             int_s = max(src_s, dst_s)
@@ -296,8 +271,8 @@ def merge(
             )
 
             # 4. Read data in source window into temp
-            src_window = src_window.round_shape()
-            dst_window = dst_window.round_shape()
+            src_window = src_window.round_lengths(pixel_precision=0)
+            dst_window = dst_window.round_lengths(pixel_precision=0)
             trows, tcols = dst_window.height, dst_window.width
             srows, scols = src_window.height, src_window.width
             # Check if resampling will happen
@@ -314,10 +289,10 @@ def merge(
             )
 
         # 5. Copy elements of temp into dest
-        dst_window = dst_window.round_offsets()
+        dst_window = dst_window.round_offsets(pixel_precison=0)
         roff, coff = dst_window.row_off, dst_window.col_off
         region = dest[:, roff:roff + trows, coff:coff + tcols]
-        if np.isnan(nodataval):
+        if math.isnan(nodataval):
             region_nodata = np.isnan(region)
         else:
             region_nodata = region == nodataval
@@ -367,21 +342,20 @@ def rowcol(transform, xs, ys, op=math.floor):
         ys = [ys]
 
     eps = sys.float_info.epsilon
+    if op(0.1) >= 1:
+        eps = -eps
 
     invtransform = ~transform
 
     rows = []
     cols = []
     for x, y in zip(xs, ys):
-        fcol, frow = invtransform * (x + eps, y - eps)
+        fcol, frow = invtransform * (x + eps, y + eps)
         cols.append(op(fcol))
         rows.append(op(frow))
 
-    if len(xs) == 1:
-        cols = cols[0]
-    if len(ys) == 1:
-        rows = rows[0]
-
+    if len(cols) == 1:
+        return rows[0], cols[0]
     return rows, cols
 
 def from_bounds(left, bottom, right, top, transform=None,
@@ -415,13 +389,18 @@ def from_bounds(left, bottom, right, top, transform=None,
     if not isinstance(transform, rasterio.Affine):  # TODO: RPCs?
         raise WindowError("A transform object is required to calculate the window")
 
-    row_start, col_start = rowcol(
-        transform, left, top, op=float)
+    rows, cols = rowcol(
+            transform,
+            [left, right, right, left],
+            [top, top, bottom, bottom],
+            op=float)
 
-    row_stop, col_stop = rowcol(
-        transform, right, bottom, op=float)
+    row_start, row_stop = min(rows), max(rows)
+    col_start, col_stop = min(cols), max(cols)
 
-    return windows.Window.from_slices(
-        (row_start, row_stop), (col_start, col_stop), height=height,
-        width=width, boundless=True)
+    return windows.Window(
+            col_off=col_start,
+            row_off=row_start,
+            width=max(col_stop - col_start, 0.0),
+            height=max(row_stop - row_start, 0.0))
 
