@@ -62,7 +62,7 @@ def main(args):
     nwm_grid = get_nwm_grid(args.nwm_grid)
     dst_grid = make_lat_lon_grid(*nwm_grid)
 
-    with xr.open_dataset(args.forcings) as forcings:
+    with xr.open_dataset(args.forcings, decode_times=False) as forcings:
         flats = forcings['latitude'][:].values
         flons = forcings['longitude'][:].values
         src_grid = make_lat_lon_grid(flats, flons)
@@ -74,7 +74,7 @@ def main(args):
         filename = args.forcings.with_suffix('.esmf_weights')
         rh_filename = filename.with_suffix('.routehandle')
         start = time.perf_counter()
-        regridder = ESMF.Regrid(srcF, dstF, src_mask_values=np.array([0]),
+        regridder = ESMF.Regrid(srcF, dstF, src_mask_values=np.array([np.nan]),
                 regrid_method=ESMF.RegridMethod.BILINEAR, unmapped_action=ESMF.UnmappedAction.IGNORE,
                 rh_filename=str(rh_filename))
         print("Regridding took:", time.perf_counter()-start)
