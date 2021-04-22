@@ -13,9 +13,10 @@ from dataclasses import dataclass
 import subprocess
 
 import rasterio
+from rasterio import merge
 from rasterio.enums import Resampling
 #from rasterio import merge
-import merge
+#import merge
 import numpy as np
 from netCDF4 import Dataset, num2date, date2num
 from tlz import pluck, groupby
@@ -215,7 +216,7 @@ class DFlowNCWriter:
             self._handle.close()
 
 
-def copy_grib(files:Iterator, suffix:str='.new') -> list:
+def copy_grib(files:Iterator, output_path:pathlib.Path, suffix:str='.new') -> list:
     """
     Run grib_copy on the grib inputs.
     This is required to work around a regression GDAL 3.1 which
@@ -235,7 +236,7 @@ def copy_grib(files:Iterator, suffix:str='.new') -> list:
     """
     rv_files = []
     for f in files:
-        output = f.parent / (f.name + suffix)
+        output = output_path / (f.name + suffix)
         if not output.exists():
             print("Preprocessing", f)
             subprocess.run(GRIB_COPY + [f, output], check=True)
@@ -459,7 +460,7 @@ def get_args():
     return args
 
 def main(args):
-    input_files = copy_grib(args.path.glob('*.hwrfprs.*.grb2'))
+    input_files = copy_grib(args.path.glob('*.hwrfprs.*.grb2'), args.output_path)
     storm_data = discover_directory(args.path, glob="*.hwrfprs.*.grb2.new")
 
     # Index the timesteps in the directory
