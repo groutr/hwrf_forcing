@@ -14,7 +14,7 @@ import rasterio
 from rasterio.enums import Resampling
 from rasterio import windows
 from rasterio.transform import Affine
-
+from rasterio.coords import BoundingBox
 
 logger = logging.getLogger(__name__)
 
@@ -251,33 +251,43 @@ def merge(
             # problem. Making it more efficient is a TODO.
 
             # 1. Compute spatial intersection of destination and source
-            src_w, src_s, src_e, src_n = src.bounds
+            try:
+                common_bound = intersect_bounds(src.bounds, (dst_w, dst_s, dst_e, dst_n))
+            except ValueError:
+                continue
 
-            int_w = max(src_w, dst_w)
-            int_s = max(src_s, dst_s)
-            int_e = min(src_e, dst_e)
-            int_n = min(src_n, dst_n)
 
             # 2. Compute the source window
             src_window = from_bounds(
-                int_w, int_s, int_e, int_n, transform=src.transform
+                *common_bound, transform=src.transform
             )
             logger.debug("Src %s window: %r", src.name, src_window)
 
 
             # 3. Compute the destination window
             dst_window = from_bounds(
-                int_w, int_s, int_e, int_n, transform=output_transform
+                *common_bound, transform=output_transform
             )
 
-            # 4. Read data in source window into temp
             src_window = src_window.round_lengths(pixel_precision=0)
             dst_window = dst_window.round_lengths(pixel_precision=0)
             trows, tcols = dst_window.height, dst_window.width
             srows, scols = src_window.height, src_window.width
+
+            # 4. Check to see if source overlaps with destination
+            dst_window = dst_window.round_offsets(pixel_precision=0)
+            trows, tcols = dst_window.height, dst_window.width
+            roff, coff = dst_window.row_off, dst_window.col_off
+            rstop = roff + trows
+            cstop = coff + tcols
+            if roff == rstop or coff == cstop:
+                continue
+
+            # 4. Read data in source window into temp
             # Check if resampling will happen
             if trows != srows or tcols != scols:
                 print("Resampling expected!", f"({srows}, {scols}) -> ({trows}, {tcols})")
+
             temp_shape = (src_count, trows, tcols)
             temp = src.read(
                 out_shape=temp_shape,
@@ -289,9 +299,7 @@ def merge(
             )
 
         # 5. Copy elements of temp into dest
-        dst_window = dst_window.round_offsets(pixel_precison=0)
-        roff, coff = dst_window.row_off, dst_window.col_off
-        region = dest[:, roff:roff + trows, coff:coff + tcols]
+        region = dest[:, roff:rstop, coff:cstop]
         if math.isnan(nodataval):
             region_nodata = np.isnan(region)
         else:
@@ -398,9 +406,35 @@ def from_bounds(left, bottom, right, top, transform=None,
     row_start, row_stop = min(rows), max(rows)
     col_start, col_stop = min(cols), max(cols)
 
-    return windows.Window(
-            col_off=col_start,
-            row_off=row_start,
+    return windows.Window.from_slices(
+            (row_start, row_stop), (col_start, col_stop),
             width=max(col_stop - col_start, 0.0),
             height=max(row_stop - row_start, 0.0))
+
+def reorient_bound(bound):
+    def order(a, b):
+        if b < a:
+            return b, a
+        return a, b
+
+    l, b, r, t = bound
+    if l < r and b < t:
+        return bound
+    else:
+        l, r = order(l, r)
+        b, t = order(b, t)
+        return BoundingBox(l, b, r, t)
+
+def intersect_bounds(bound1, bound2):
+    bound1 = reorient_bound(bound1)
+    bound2 = reorient_bound(bound2)
+
+    int_l = max(bound1[0], bound2[0])
+    int_b = max(bound1[1], bound2[1])
+    int_r = min(bound1[2], bound2[2])
+    int_t = min(bound1[3], bound2[3])
+
+    if int_l < int_r and int_b < int_t:
+        return BoundingBox(int_l, int_b, int_r, int_t)
+    raise ValueError("disjoint bounds")
 
