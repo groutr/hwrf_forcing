@@ -13,10 +13,10 @@ from dataclasses import dataclass
 import subprocess
 
 import rasterio
-from rasterio import merge
+#from rasterio import merge
 from rasterio.enums import Resampling
 #from rasterio import merge
-#import merge
+import merge
 import numpy as np
 from netCDF4 import Dataset, num2date, date2num
 from tlz import pluck, groupby
@@ -374,12 +374,10 @@ def _merge_layers(res_levels, res=None, indices=None, **kwargs):
         t: transform for merged dataset
     """
     nodata_vals = [d.nodata for d in res_levels]
-
     rv, t = merge.merge(res_levels,
                         bounds=BOUNDS,
                         nodata=np.nan,
                         dtype='float32',
-                        precision=50,
                         res=res,
                         indexes=indices,
                         resampling=Resampling.bilinear)
@@ -420,7 +418,6 @@ def export_dflow_nc(export_path, date, rv, transform, layers, compress=True):
     latv.setncatts(ATTRS["latitude"])
     timev.setncatts(ATTRS["time"])
 
-    #breakpoint()
     longitude = rasterio.transform.xy(transform, range(rv.shape[2]), [0]*rv.shape[2])
     latitude = rasterio.transform.xy(transform, [0]*rv.shape[1], range(rv.shape[1]))
     longv[:] = np.array(longitude[0])
@@ -461,7 +458,7 @@ def get_args():
 
 def main(args):
     input_files = copy_grib(args.path.glob('*.hwrfprs.*.grb2'), args.output_path)
-    storm_data = discover_directory(args.path, glob="*.hwrfprs.*.grb2.new")
+    storm_data = discover_directory(args.output_path, glob="*.hwrfprs.*.grb2.new")
 
     # Index the timesteps in the directory
     time_steps = defaultdict(list)
