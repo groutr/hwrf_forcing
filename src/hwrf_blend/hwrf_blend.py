@@ -436,7 +436,11 @@ def export_dflow_nc(export_path, date, rv, transform, layers, compress=True):
     nc.close()
 
 def linear_blend(length):
-    return np.linspace(0, 1, length+2)[1:-1]
+    step = 1/(length + 1)
+    val = step
+    while val < 1:
+        yield val
+        val += step
 
 def get_lons_lats(transform, shape):
     lats = rasterio.transform.xy(transform, range(shape[1]), [0] * shape[1])
@@ -448,12 +452,10 @@ def get_args():
     parser.add_argument('path', type=pathlib.Path, help="directory to process")
     parser.add_argument('output_path', type=pathlib.Path, help='Directory to store processed files')
     parser.add_argument('--storm', required=False, help="only process a particular storm")
-    parser.add_argument('--ramp-weights', help="comma delimted sequence of weights for blending between cycles")
     parser.add_argument('-b', '--bounds', default=DEFAULT_BOUNDS, help="boundary points (left,bottom,right,top)")
     args = parser.parse_args()
 
     # Basic validation for ramp-weights
-    args.ramp_weights = np.array(args.ramp_weights.split(','), dtype=float)
     global BOUNDS
     BOUNDS = args.bounds = tuple(map(float, args.bounds.split()))
     return args
@@ -469,14 +471,15 @@ def main(args):
         time_steps[pf[0].fdate()].append(pf)
 
     BUFFER = deque()
-    overlap_counter = 0
 
     NCFile = DFlowNCWriter(args.output_path.joinpath(args.storm + ".nc"), compress=True)
     NCFile.create_coordinate("time", None, 'f8', ATTRS['time'])
     ref_time = ATTRS['time']['units']
     indices=None
 
-    for idx, ts in enumerate(sorted(time_steps.keys())):
+    sorted_times = sorted(time_steps.keys())
+    weights = None
+    for idx, ts in enumerate(sorted_times):
         print("Processing timestep:", ts)
         # merge
         print("Merging...")
@@ -491,27 +494,32 @@ def main(args):
             BUFFER.append(X)
 
         if len(BUFFER) > 1:
+            # Determine length of blend by looking ahead
+            if weights is None:
+                idx_stop = idx + 1
+                while idx_stop < len(sorted_times):
+                    key = sorted_times[idx_stop]
+                    if len(time_steps[key]) == 1:
+                        break
+                weights = linear_blend(idx_stop - idx)
+
             # blend
             print("Blending buffer...")
             assert len(BUFFER) == 2
-            try:
-                weight = args.ramp_weights[overlap_counter]
-                X1 = BUFFER.popleft()
-                X2 = BUFFER.popleft()
-                print(f"Blending with weight of {1-weight}X1 + {weight}X2")
-                _x1 = X1[0]
-                _x2 = X2[0]
-                # Do (1-weight) * X1 + weight * X2 without intermediate arrays
-                np.multiply(_x1, (1-weight), _x1)
-                np.multiply(_x2, weight, _x2)
-                np.add(_x1, _x2, _x1)
-                BUFFER.appendleft((_x1, *X1[1:]))
-            except IndexError:
-                print("Insufficient number of weights given. Need at least", overlap_counter + 1)
-                raise
-            overlap_counter += 1
+
+            weight = next(weights)
+            X1 = BUFFER.popleft()
+            X2 = BUFFER.popleft()
+            print(f"Blending with weight of {1-weight}X1 + {weight}X2")
+            _x1 = X1[0]
+            _x2 = X2[0]
+            # Do (1-weight) * X1 + weight * X2 without intermediate arrays
+            np.multiply(_x1, (1-weight), _x1)
+            np.multiply(_x2, weight, _x2)
+            np.add(_x1, _x2, _x1)
+            BUFFER.appendleft((_x1, *X1[1:]))
         else:
-            overlap_counter = 0
+            weights = None
 
         rv, transform, layers = BUFFER.popleft()
         # Write outputs
