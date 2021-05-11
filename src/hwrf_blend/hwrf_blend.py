@@ -499,6 +499,7 @@ def main(args):
                     key = sorted_times[idx_stop]
                     if len(time_steps[key]) == 1:
                         break
+                    idx_stop += 1
                 weights = linear_blend(idx_stop - idx)
 
             # blend
