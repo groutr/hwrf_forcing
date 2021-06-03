@@ -166,6 +166,7 @@ def parse_filename(filename:pathlib.Path):
 
 @dataclass
 class Filename:
+    """Represent the various parts of a file name"""
     filename: str
     storm: str
     date: datetime.datetime
@@ -186,17 +187,39 @@ class Filename:
 
 class DFlowNCWriter:
     def __init__(self, filename, compress=True):
+        """Open a dataset at the path given by filename for writing.
+
+        Args:
+            filename (pathlib.Path): file path to write to
+            compress (bool, optional): use compression for variables. Defaults to True.
+        """
         self.filename = filename
         self._handle = Dataset(filename, 'w')
         self.compress = compress
 
     def create_coordinate(self, name, size, dtype, attrs):
+        """Create a coordinate in the netCDF file.
+
+        Args:
+            name (str): name of coordinate
+            size (int): size of coordinate
+            dtype (str): data type of coordinate
+            attrs (dict): attributes for coordinate
+        """
         assert self._handle.isopen()
         self._handle.createDimension(name, size)
         v = self._handle.createVariable(name, dtype, dimensions=(name,), zlib=self.compress)
         v.setncatts(attrs)
 
     def create_variable(self, name, dtype, dims, attrs):
+        """Create a variable in the netCDF file.
+
+        Args:
+            name (str): name of variable
+            dtype (str): data type of variable
+            dims (tuple): dimensions of variable
+            attrs (dict): attributes for variable
+        """
         assert self._handle.isopen()
         v = self._handle.createVariable(name, dtype, dimensions=dims, zlib=self.compress)
         v.setncatts(attrs)
