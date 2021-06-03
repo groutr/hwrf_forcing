@@ -1,6 +1,7 @@
 import argparse
 import pathlib
 import time
+from multiprocessing import Pool
 
 import ESMF
 import xarray as xr
@@ -23,8 +24,7 @@ def make_lat_lon_grid(lat, lon):
     G = ESMF.Grid(shape,
             coord_sys=ESMF.CoordSys.SPH_DEG,
             coord_typekind=typekind,
-            staggerloc=ESMF.StaggerLoc.CENTER,
-            pole_kind=np.array([ESMF.PoleKind.MONOPOLE]*2))
+            staggerloc=ESMF.StaggerLoc.CENTER)
 
     LO = G.get_coords(0)
     LA = G.get_coords(1)
@@ -39,6 +39,28 @@ def make_fields(src_grid, dst_grid):
     return srfF, dstF
 
 
+def make_regridder(src, dst, weight_filename):
+    if weight_filename.exists():
+        print("Creating regridder from file")
+        rv = ESMF.RegridFromFile(src, dst,
+                filename=str(weight_filename))
+    else:
+        print("Creating regridder")
+        rv = ESMF.Regrid(src, dst,
+                filename=str(weight_filename),
+                src_mask_values=np.array([np.nan, 0]),
+                dst_mask_values=np.array([np.nan, 0]),
+                regrid_method=ESMF.RegridMethod.BILINEAR,
+                unmapped_action=ESMF.UnmappedAction.IGNORE)
+    return rv
+
+def get_blend_grid(filename):
+    with xr.open_dataset(filename) as ds:
+        ds = ds.sel({"time": 0})
+        xlat = ds.latitude.values
+        xlong = ds.longitude.values
+    return np.meshgrid(xlong, xlat, indexing='ij')
+
 def get_nwm_grid(filename):
     with xr.open_dataset(filename) as ds:
         ds = ds.sel({"Time": 0})
@@ -46,46 +68,28 @@ def get_nwm_grid(filename):
         xlong = ds.XLONG_M.values
     return xlat, xlong
 
-def get_options():
-    parser = argparse.ArgumentParser()
 
-    parser.add_argument('forcings', type=pathlib.Path, help='Location of forcings file')
-    parser.add_argument('nwm_grid', type=pathlib.Path, help='Location of NWM grid')
-
-    methods = tuple(ESMF.api.constants.RegridMethod.__members__.keys())
-    parser.add_argument('--method', choices=methods, help='Regridding method')
-    parser.add_argument('--filename', help='filename for ESMF weights cache')
-    args = parser.parse_args()
-    return args
-
-def main(args):
-    nwm_grid = get_nwm_grid(args.nwm_grid)
+def regrid(src, dst, weights, nwm_file):
+    nwm_grid = get_nwm_grid(nwm_file)
     dst_grid = make_lat_lon_grid(*nwm_grid)
 
-    with xr.open_dataset(args.forcings, decode_times=False) as forcings:
-        flats = forcings['latitude'][:].values
-        flons = forcings['longitude'][:].values
+    with xr.open_dataset(src, decode_times=False) as ds:
+        flats = ds['latitude'].values
+        flons = ds['longitude'].values
         src_grid = make_lat_lon_grid(flats, flons)
 
-        print("Creating fields")
         srcF, dstF = make_fields(src_grid, dst_grid)
-
-        print("Creating ESMF regridding object")
-        filename = args.forcings.with_suffix('.esmf_weights')
-        rh_filename = filename.with_suffix('.routehandle')
         start = time.perf_counter()
-        regridder = ESMF.Regrid(srcF, dstF, src_mask_values=np.array([np.nan]),
-                regrid_method=ESMF.RegridMethod.BILINEAR, unmapped_action=ESMF.UnmappedAction.IGNORE,
-                rh_filename=str(rh_filename))
-        print("Regridding took:", time.perf_counter()-start)
+        regridder = make_regridder(srcF, dstF, weights)
+        print("Regridder created", time.perf_counter() - start)
 
         clon = dstF.grid.get_coords(0)
         clat = dstF.grid.get_coords(1)
-        rf = netCDF4.Dataset(str(filename.with_suffix(".regridded.nc")), mode='w')
-        rf.createDimension('time', len(forcings.time))
+        rf = netCDF4.Dataset(dst, mode='w')
+        rf.createDimension('time', len(ds.time))
         v = rf.createVariable('time', 'f8', dimensions=('time',), zlib=True)
-        v[:] = forcings.time.values
-        v.setncatts(forcings.time.attrs)
+        v[:] = ds.time.values
+        v.setncatts(ds.time.attrs)
         rf.createDimension('x', clon.shape[0])
         rf.createDimension('y', clon.shape[1])
         v = rf.createVariable('latitude', 'f8', dimensions=('x', 'y'), zlib=True)
@@ -93,19 +97,53 @@ def main(args):
         v = rf.createVariable('longitude', 'f8', dimensions=('x', 'y'), zlib=True)
         v[:] = clon
 
-        tmp = np.full((len(forcings.time), *clon.shape), np.nan, dtype='float32')
-        for V in forcings.data_vars:
+        tmp = np.full((len(ds.time), *clon.shape), np.nan, dtype='float32')
+        for V in ds.data_vars:
             print("Regridding", V)
-            fv = forcings[V]
+            fv = ds[V]
             rv = rf.createVariable(V, 'f4', dimensions=('time', 'x', 'y'), zlib=True)
             tmp.fill(np.nan)
-            for ts in range(forcings.time.size):
-                print("timestep", ts, end='\r')
+            for ts in range(ds.time.size):
                 srcF.data[:] = fv[ts].values
                 regridder(srcF, dstF)
                 tmp[ts, ...] = dstF.data[:]
             rv[:] = tmp
         rf.close()
+        regridder.destroy()
+    print("Regridding", src, "finished")
+
+def get_options():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('forcings', type=pathlib.Path, help='Location of forcings files')
+    parser.add_argument('nwm_grid', type=pathlib.Path, help='Location of NWM grid')
+
+    parser.add_argument('--weights', type=pathlib.Path, help="Precomputed weights")
+    parser.add_argument('--output', type=pathlib.Path, help="Directory to put output")
+    args = parser.parse_args()
+
+    args.weights = args.weights.resolve()
+    args.output = args.output.resolve()
+    return args
+
+def main(args):
+
+    # we want to perform first regridding to calculate weights
+    pargs = []
+    for fn in args.forcings.glob("*.nc"):
+        pargs.append((fn, args.output.joinpath(f"{fn.name}.regridded"),
+                    args.weights, args.nwm_grid))
+
+    piargs = iter(pargs)
+    if not args.weights.exists():
+        regrid(*next(piargs))
+
+    with Pool(4) as pool:
+        pool.starmap_async(regrid, piargs)
+        pool.close()
+        print("Waiting for all processes to finish...")
+        pool.join()
+    print("Regridding task finished")
 
 
 if __name__ == "__main__":
