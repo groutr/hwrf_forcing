@@ -132,14 +132,14 @@ PATTERNS = [{"GRIB_ELEMENT": "TMP", "GRIB_SHORT_NAME": "2-HTGL", "GRIB_PDS_PDTN"
 #            {"GRIB_ELEMENT": "DPT", "GRIB_SHORT_NAME": "2-HTGL", "GRIB_PDS_PDTN": "0"},
             {"GRIB_ELEMENT": "HGT", "GRIB_SHORT_NAME": "0-SFC", "GRIB_PDS_PDTN": "0"}]
 NC_VARS = {"PRMSL": "msl",
-    "UGRD": "u10",
-    "VGRD": "v10",
+    "UGRD": "U2D",
+    "VGRD": "V2D",
     "PRES": "PSFC",
     "TMP": "T2D",
     "SPFH": "Q2D",
     "DLWRF": "LWDOWN",
     "DSWRF": "SWDOWN",
-    "PRATE": "PRATE"
+    "PRATE": "RAINRATE"
 }
 
 
