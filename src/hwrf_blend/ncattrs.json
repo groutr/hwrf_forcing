@@ -6,7 +6,7 @@
         "cell_methods": "time: point",
         "scale_factor": 0.001,
         "add_offset": 0.0
-    }
+    },
     "V2D": {
         "units": "m s-1",
         "standard_name": "y_wind",
@@ -14,7 +14,7 @@
         "cell_methods": "time: point",
         "scale_factor": 0.001,
         "add_offset": 0.0
-    }
+    },
     "LWDOWN": {
         "units": "W m-2",
         "standard_name": "surface_downward_longwave_flux",
@@ -22,7 +22,7 @@
         "cell_methods": "time: point",
         "scale_factor": 0.001,
         "add_offset": 0.0
-    }
+    },
     "RAINRATE": {
         "units": "mm s^-1",
         "standard_name": "precipitation_flux",
@@ -30,7 +30,7 @@
         "cell_methods": "time: mean",
         "scale_factor": 1.0,
         "add_offset": 0.0
-    }
+    },
     "T2D": {
         "units": "K",
         "standard_name": "air_temperature",
@@ -38,7 +38,7 @@
         "cell_methods": "time: point",
         "scale_factor": 0.01,
         "add_offset": 100.0
-    }
+    },
     "Q2D": {
         "units": "kg kg-1",
         "standard_name": "surface_specific_humidity",
@@ -46,7 +46,7 @@
         "cell_methods": "time: point",
         "scale_factor": 0.000001,
         "add_offset": 0.0
-    }
+    },
     "PSFC": {
         "units": "Pa",
         "standard_name": "air_pressure",
@@ -54,7 +54,7 @@
         "cell_methods": "time: point",
         "scale_factor": 0.1,
         "add_offset": 0.0
-    }
+    },
     "SWDOWN": {
         "units": "W m-2",
         "standard_name": "surface_downward_shortwave_flux",
