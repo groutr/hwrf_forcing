@@ -22,6 +22,18 @@ VARMAP = {
     "PRATE_surface": "RAINRATE"
 }
 
+def date_ceil_hr(dt):
+    """Ceil a datetime object."""
+    if dt.minute == 0:
+        return dt
+
+    if dt.hour == 23:
+        day = dt.day + 1
+    else:
+        day = dt.day
+    return cftime.datetime(dt.year, dt.month, day, (dt.hour+1) % 24)
+
+
 def regrid(forcing_file, nwm_grid, weights, output_path, ncatts=None):
     """Regrid the forcing_file and write to output_dir
 
@@ -37,16 +49,21 @@ def regrid(forcing_file, nwm_grid, weights, output_path, ncatts=None):
         print("Computing weights...")
         rg = xe.Regridder(src_grid, dst_grid, 'bilinear', reuse_weights=False, filename=weights)
     enc = {'zlib': True}
-    with xr.open_dataset(forcing_file) as ds:
+    with xr.open_dataset(forcing_file, decode_cf=True, mask_and_scale=True, use_cftime=True, decode_times=True) as ds:
         print("Regridding", forcing_file)
-        rv = rg(ds)
-        rv = rv.rename(VARMAP)
+        rv = rg(ds, keep_attrs=True)
+        #rv = rv.rename(VARMAP)
+        rv = rv.rename({'x': "west_east", 'y': "south_north"})
         if ncatts:
             with open(ncatts) as fh:
                 for k, v in json.load(fh).items():
                     rv[k].attrs.update(v)
-        print("Writing", output_path)
-        rv.to_netcdf(output_path, encoding={v: enc for v in rv.variables})
+        timestamp = date_ceil_hr(ds.time.values[0])
+        # Set nan values to 0
+        rv = rv.fillna(0)
+        output_name = output_path / timestamp.strftime("%Y%m%d%H.LDASIN_DOMAIN1")
+        print("Writing", output_name)
+        rv.to_netcdf(output_name, encoding={v: enc for v in rv.variables})
 
 
 def get_masterblend_grid(filename):
