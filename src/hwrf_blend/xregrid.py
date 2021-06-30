@@ -6,8 +6,10 @@ import json
 import xesmf as xe
 import xarray as xr
 import numpy as np
+import cftime
 
 from multiprocessing import Pool
+from multiprocessing import cpu_count
 
 VARMAP = {
     "uwnd": "U2D",
@@ -64,6 +66,8 @@ def get_options():
     parser.add_argument('forcings', type=pathlib.Path, help='Path of forcings inputs to regrid.')
     parser.add_argument('nwm_grid', type=pathlib.Path, help='Location of NWM grid.')
 
+    parser.add_argument('--pool', type=int, default=1,
+                        help="How many processes to use for parallelization")
     parser.add_argument('--ncatts', type=pathlib.Path, default=None, help="NetCDF attributes to attach to output")
     parser.add_argument('--output', type=pathlib.Path, help="Directory to write output")
     parser.add_argument('--weights', type=pathlib.Path, help="Precomputed weights")
@@ -77,15 +81,18 @@ def main(args):
 
     pargs = []
     for fn in args.forcings.glob("*.nc"):
-        output = args.output / f"{fn.name}.regridded"
+        output = args.output
         pargs.append((fn, args.nwm_grid, weights, output, args.ncatts))
     piargs = iter(pargs)
 
     if not weights.exists():
         regrid(*next(piargs))
 
-    with Pool(4) as pool:
+    ncpus = min(cpu_count(), args.pool)
+    with Pool(ncpus) as pool:
+        print("Initialized pool with", ncpus, "processes")
         for task_args in piargs:
+            #regrid(*task_args)
             pool.apply_async(regrid, args=task_args)
 
         pool.close()
