@@ -1,15 +1,13 @@
+from datetime import datetime
 from typing import Iterator
 
 import logging
 import argparse
 import re
-import datetime
 import pathlib
+import json
 import itertools
-import functools
-import operator
-from collections import deque, defaultdict
-from dataclasses import dataclass
+from collections import deque
 import subprocess
 
 import rasterio
@@ -18,8 +16,8 @@ from rasterio.enums import Resampling
 #from rasterio import merge
 import merge
 import numpy as np
-from netCDF4 import Dataset, num2date, date2num
-from tlz import pluck, groupby
+from netCDF4 import Dataset, date2num
+from tlz import concat
 
 DEFAULT_BOUNDS = "-102 20 -58 48"
 RES_LEVELS = ('core', 'storm', 'synoptic')
@@ -71,49 +69,7 @@ NC_VARS = {"PRMSL": "msl",
 }
 
 
-def parse_filename(filename:pathlib.Path):
-    """
-    Parse a filename for storm related information.
-
-    Args:
-        filename: Filename to parse
-
-    Returns:
-        (Filename)
-        (None): Returned if filename cannot be parsed.
-    """
-    match = FNAME_RE.search(filename.name)
-    if match:
-        storm = match.group('storm')
-        date = datetime.datetime.strptime(match.group('date'), '%Y%m%d%H')
-        level = match.group('level')
-        res = float(match.group('res').replace('p', '.'))
-        fhour = int(match.group('fhour'))
-        return Filename(filename, storm, date, level, res, fhour)
-
-
-@dataclass
-class Filename:
-    """Represent the various parts of a file name"""
-    filename: str
-    storm: str
-    date: datetime.datetime
-    level: str
-    res: float
-    fhour: int
-
-    @property
-    def cycle(self):
-        return self.date.hour
-
-    def fdate(self):
-        """
-        Return the real forecasted date.
-        """
-        return self.date + datetime.timedelta(hours=self.fhour)
-
-
-class DFlowNCWriter:
+class NCWriter:
     def __init__(self, filename, compress=True):
         """Open a dataset at the path given by filename for writing.
 
@@ -197,78 +153,6 @@ def copy_grib(files:Iterator, output_path:pathlib.Path, suffix:str='.new') -> li
     return rv_files
 
 
-def order_layers(layers):
-    """
-    Order layers according to RES_LEVELS
-    """
-    ordered = []
-    for r in RES_LEVELS:
-        for L in layers:
-            if r in L.name:
-                ordered.append(L)
-                break
-    return ordered
-
-def complement_re(filename):
-    """Generate a regular expression to match
-    the complementary resolution levels.
-
-    This assumes that the filenames are regular.
-
-    Args:
-        filename (str): filename to find complements of
-
-    Returns:
-        (str): Regular expression to match the different resolution
-        levels of the same time step.
-    """
-    parts = filename.name.split('.')
-
-    rlvls = '|'.join(RES_LEVELS)
-    try:
-        del parts[3]  # remove core/storm/synoptic
-        del parts[3]  # remove resolution level
-    except IndexError:
-        print(parts)
-        raise
-    parts.insert(3, r"(\d+?p\d+?)")
-    parts.insert(3, f"({rlvls})")
-    return f"^{'.'.join(parts)}$"
-
-
-def discover_directory(path, glob="*.*.hwrfprs.*.*.*"):
-    """Discover resolution levels for each timestep.
-
-    Args:
-        path (str, pathlib.PathLike): Path to directory
-        glob (str): Glob to filter directory contents
-
-    Returns:
-        (List[List[pathlib.PathLike]]): A list of associated resolution levels.
-    """
-    path = pathlib.Path(path)
-
-    if glob:
-        fileset = tuple(path.glob(glob))
-    else:
-        fileset = tuple(path.iterdir())
-
-    seen = set()
-    pairs = []
-    for fn in fileset:
-        if fn in seen:
-            continue
-        p = []
-        pat = complement_re(fn)
-        for t in fileset:
-            if re.match(pat, t.name):
-                p.append(t)
-                seen.add(t)
-        if len(p) != len(RES_LEVELS):
-            print(p, "Missing a resolution level")
-        else:
-            pairs.append(order_layers(p))
-    return pairs
 
 def match_case(case, cases):
     for c in cases:
@@ -290,9 +174,43 @@ def find_vars(ds):
             indices[v] = ds.tags(v)
     return indices
 
-def celsius_to_kelvin(arr):
-    """Convert Celsius temps to Kelvin"""
-    return arr + 273.15
+
+def validate_recipe(recipe):
+    p = recipe['priority']
+
+    sources = set()
+    for ts, v in p.items():
+        sources.update(v)
+        for src in v:
+            if ts not in recipe[src]:
+                raise KeyError(f"{src} missing timestep {ts}")
+            
+    for k in sources:
+        for files in recipe[k].values():
+            for f in concat(files):
+                if not pathlib.Path(f).is_file():
+                    raise ValueError(f"{f} is not a file")
+
+
+def read_recipe(path):
+    with open(path) as fin:
+        rv = json.load(fin)
+    return rv
+
+
+def list_wrap(obj):
+    if not isinstance(obj, list):
+        raise ValueError("Object must be a list")
+    if len(obj) > 0 and isinstance(obj[0], list):
+        return obj
+    return [obj]
+
+
+def combine(*sources):
+    """This employs a bit of magic to get the sequences to align just right.
+    Given all the sources for a timestep, yield frames. There should be exactly one or two frames."""
+    return map(concat, itertools.product(*map(list_wrap, sources)))
+
 
 def merge_layers(res_levels, res=None, indices=None, **kwargs):
     ds_readers = [isinstance(rl, rasterio.DatasetReader) for rl in res_levels]
@@ -340,49 +258,6 @@ def _merge_layers(res_levels, res=None, indices=None, **kwargs):
 
     return rv, t
 
-def export_dflow_nc(export_path, date, rv, transform, layers, compress=True):
-    """
-    Write outputs to a netcdf file.
-
-    Arguments:
-        export_file: filename
-        longitude: longitude coordinate array
-        latitude: latitude coordinate array
-        variables: dictonary of variables to write {string: data}
-        compress: compress variables
-    """
-    filename = f"{date.strftime('%Y%m%d%H')}_LDASIN"
-    efn = pathlib.Path(export_path, filename)
-    print("Writing output to:", efn)
-    nc = Dataset(str(efn), "w")
-
-    # Dimensions
-    timed = nc.createDimension("time", 1)
-    longd = nc.createDimension("longitude", rv.shape[2])
-    latd = nc.createDimension("latitude", rv.shape[1])
-
-    # Variables
-    timev = nc.createVariable("time", 'f8', dimensions=("time",), zlib=compress)
-    longv = nc.createVariable("longitude", 'f8', dimensions=("longitude",), zlib=compress)
-    latv = nc.createVariable("latitude", 'f8', dimensions=("latitude",), zlib=compress)
-    longv.setncatts(ATTRS["longitude"])
-    latv.setncatts(ATTRS["latitude"])
-    timev.setncatts(ATTRS["time"])
-
-    longitude = rasterio.transform.xy(transform, range(rv.shape[2]), [0]*rv.shape[2])
-    latitude = rasterio.transform.xy(transform, [0]*rv.shape[1], range(rv.shape[1]))
-    longv[:] = np.array(longitude[0])
-    latv[:] = np.array(latitude[1])
-    timev[:] = date2num(date, "days since 1990-01-01 00:00:00", calendar='julian')
-
-    for i, vname in enumerate(layers):
-        vto = NC_VARS[vname]
-        v = nc.createVariable(vto, 'f4', dimensions=("time", "longitude", "latitude"), zlib=compress)
-        v.setncatts(ATTRS[vname])
-
-        v[:] = rv[i].T
-
-    nc.close()
 
 def linear_blend(length):
     step = 1/(length + 1)
@@ -398,9 +273,8 @@ def get_lons_lats(transform, shape):
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('path', type=pathlib.Path, help="directory to process")
+    parser.add_argument('recipe', type=pathlib.Path, help="Recipe to execute")
     parser.add_argument('output_path', type=pathlib.Path, help='Directory to store processed files')
-    parser.add_argument('--storm', required=False, help="only process a particular storm")
     parser.add_argument('-b', '--bounds', default=DEFAULT_BOUNDS, help="boundary points (left,bottom,right,top)")
     args = parser.parse_args()
 
@@ -410,34 +284,29 @@ def get_args():
     return args
 
 def main(args):
-    input_files = copy_grib(args.path.glob('*.hwrfprs.*.grb2'), args.output_path)
-    storm_data = discover_directory(args.output_path, glob="*.hwrfprs.*.grb2.new")
-
-    # Index the timesteps in the directory
-    time_steps = defaultdict(list)
-    for f in storm_data:
-        pf = [parse_filename(x) for x in f]
-        time_steps[pf[0].fdate()].append(pf)
+    recipe = read_recipe(args.recipe)
+    validate_recipe(recipe)
+    priority = recipe['priority']
 
     BUFFER = deque()
 
-    NCFile = DFlowNCWriter(args.output_path.joinpath(args.storm + ".nc"), compress=True)
+    NCFile = NCWriter(args.output_path.joinpath("Output.nc"), compress=True)
     NCFile.create_coordinate("time", None, 'f8', ATTRS['time'])
     ref_time = ATTRS['time']['units']
     indices=None
 
-    sorted_times = sorted(time_steps.keys())
     weights = None
+    sorted_times = sorted(priority.keys())
     for idx, ts in enumerate(sorted_times):
-        print("Processing timestep:", ts)
-        # merge
-        print("Merging...")
-        for t in sorted(time_steps[ts], key=lambda x: x[0].date):
-            res = min(_x.res for _x in t)
-            ds_files = [_x.filename for _x in t]
-            with rasterio.open(ds_files[0]) as ds:
-                indices = find_vars(ds)
-            X = merge_layers(ds_files, res=res, indices=list(indices.keys()))
+        order = priority[ts]
+        ts = datetime.fromisoformat(ts)
+        frames = combine(*(recipe[src][ts] for src in order))
+
+        for frame in frames:
+            copy_grib(frame)
+            ds_files = tuple(rasterio.open, frame)
+            res = min(_x.res for _x in ds_files)
+            X = merge_layers(ds_files, res=res)
             print("Shape:", X[0].shape)
             X += (indices,)  # add indices to tuple
             BUFFER.append(X)
@@ -491,8 +360,6 @@ def main(args):
         for il, layer in enumerate(layers.values()):
             element = layer["GRIB_ELEMENT"]
             vto = NC_VARS[element]
-            if layer["GRIB_UNIT"] == "[C]" and ATTRS[element]["units"] == "K":
-                rv[il] = celsius_to_kelvin(rv[il])
             NCFile.variables[vto][idx, ...] = rv[il]
 
 
