@@ -17,7 +17,7 @@ from rasterio.enums import Resampling
 import merge
 import numpy as np
 from netCDF4 import Dataset, date2num
-from tlz import concat
+from tlz import concat, pluck
 
 DEFAULT_BOUNDS = "-102 20 -58 48"
 RES_LEVELS = ('core', 'storm', 'synoptic')
@@ -178,23 +178,41 @@ def find_vars(ds):
 def validate_recipe(recipe):
     p = recipe['priority']
 
-    sources = set()
     for ts, v in p.items():
-        sources.update(v)
         for src in v:
-            if ts not in recipe[src]:
+            if ts not in recipe[src]["timesteps"]:
                 raise KeyError(f"{src} missing timestep {ts}")
             
-    for k in sources:
-        for files in recipe[k].values():
+    for k in sources(p):
+        for files in recipe[k]["timesteps"].values():
             for f in concat(files):
                 if not pathlib.Path(f).is_file():
                     raise ValueError(f"{f} is not a file")
 
+def sources(priority):
+    return set(concat(priority.values()))
+
+def sort_dictionary_by_key(d):
+    """Sort a dictionary by key.
+    Works because dictionaries in Python 3.7+ retain insertion order.
+
+    Args:
+        d (dict): dictionary
+
+    Returns:
+        dict: new sorted dictionary
+    """
+    return dict(sorted(d.items()))
 
 def read_recipe(path):
     with open(path) as fin:
         rv = json.load(fin)
+
+    # Ensure timesteps are sorted
+    rv['priority'] = sort_dictionary_by_key(rv['priority'])
+    for src in sources(rv['priority']):
+        rv[src]["timesteps"] = sort_dictionary_by_key(rv[src]["timesteps"])
+        
     return rv
 
 
@@ -208,7 +226,7 @@ def list_wrap(obj):
 
 def combine(*sources):
     """This employs a bit of magic to get the sequences to align just right.
-    Given all the sources for a timestep, yield frames. There should be exactly one or two frames."""
+    Given all the sources for a timestep, yield frames."""
     return map(concat, itertools.product(*map(list_wrap, sources)))
 
 
@@ -242,20 +260,15 @@ def _merge_layers(res_levels, res=None, indices=None, **kwargs):
             Order follows order of variables in dataset or order given in indices if specified.
         t: transform for merged dataset
     """
-    nodata_vals = [d.nodata for d in res_levels]
+    dt = kwargs.pop('dtype', 'float32')
+    bounds = kwargs.pop('bounds', None)
     rv, t = merge.merge(res_levels,
-                        bounds=BOUNDS,
+                        bounds=bounds,
                         nodata=np.nan,
-                        dtype='float32',
+                        dtype=dt,
                         res=res,
                         indexes=indices,
                         resampling=Resampling.bilinear)
-    # handle possibly different no_data values
-    for i, nd in enumerate(nodata_vals):
-        if nd is not None:
-            mask = rv == nd
-            rv[mask] = np.nan
-
     return rv, t
 
 
@@ -265,6 +278,7 @@ def linear_blend(length):
     while val < 1:
         yield val
         val += step
+
 
 def get_lons_lats(transform, shape):
     lats = rasterio.transform.xy(transform, range(shape[1]), [0] * shape[1])
@@ -296,17 +310,27 @@ def main(args):
     indices=None
 
     weights = None
-    sorted_times = sorted(priority.keys())
-    for idx, ts in enumerate(sorted_times):
+    frames = []
+    for ts in sorted(priority.keys()):
         order = priority[ts]
-        ts = datetime.fromisoformat(ts)
-        frames = combine(*(recipe[src][ts] for src in order))
+        _sources = pluck(ts, (recipe[src]["timesteps"] for src in order))
+        frames.append(tuple(combine(*_sources)))
 
+    # Merging and blending operation
+    # For each time step we build a the following sequence
+    # ts = [[n], [[a, b, c], [x, y, z]], [m]]
+    # We generate the frames:
+    # frame1 = [n, a, b, c, m]
+    # frame2 = [n, x, y, z, m]
+    # We merge each frame. Then blend (if there are two frames)
+
+
+    for idx in enumerate(frames):
         for frame in frames:
             copy_grib(frame)
             ds_files = tuple(rasterio.open, frame)
             res = min(_x.res for _x in ds_files)
-            X = merge_layers(ds_files, res=res)
+            X = merge_layers(ds_files, res=res, bounds=args.bounds)
             print("Shape:", X[0].shape)
             X += (indices,)  # add indices to tuple
             BUFFER.append(X)
@@ -315,9 +339,8 @@ def main(args):
             # Determine length of blend by looking ahead
             if weights is None:
                 idx_stop = idx + 1
-                while idx_stop < len(sorted_times):
-                    key = sorted_times[idx_stop]
-                    if len(time_steps[key]) == 1:
+                while idx_stop < len(frames):
+                    if len(frames[idx_stop]) == 1:
                         break
                     idx_stop += 1
                 weights = linear_blend(idx_stop - idx)
