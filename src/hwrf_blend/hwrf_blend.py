@@ -227,7 +227,21 @@ def list_wrap(obj):
 def combine(*sources):
     """This employs a bit of magic to get the sequences to align just right.
     Given all the sources for a timestep, yield frames."""
-    return map(concat, itertools.product(*map(list_wrap, sources)))
+    # Unpack one level. if sources make a single frame, 
+    # then tmp should be a list of paths
+    framesrc = []
+    has_it = False
+    for src in sources:
+        if len(src) > 1:
+            framesrc.append(iter(src))
+            has_it = True
+        else:
+            framesrc.append(itertools.cycle(src))
+    frames = zip(*framesrc)
+    if has_it:
+        return list(frames)
+    else:
+        return [next(frames)]
 
 
 def merge_layers(res_levels, res=None, indices=None, **kwargs):
