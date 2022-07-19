@@ -25,10 +25,10 @@ VARMAP = {
 
 REGRIDDER = None
 
-def worker_load_weights(src, dst, weights):
+def worker_load_weights(src, dst, weights, force_recalc):
     global REGRIDDER
-
-    if weights.exists():
+        
+    if weights and not force_recalc:
         print("Worker loading weights...")
         REGRIDDER = xe.Regridder(src, dst, 'bilinear', reuse_weights=True, weights=weights)
     else:
@@ -97,7 +97,10 @@ def get_options():
     parser.add_argument('--recalc', action='store_true', help='Force recalculation of weights')
     args = parser.parse_args()
     if args.weights:
-        args.weights = args.weights.resolve()
+        if args.weights.is_file():
+            args.weights = args.weights.resolve()
+        else:
+            raise RuntimeError("Weights must point to a file")
     args.output = args.output.resolve()
     return args
 
@@ -110,16 +113,14 @@ def main(args):
         pargs.append((fn, args.nwm_grid, weights, output, args.ncatts))
     piargs = iter(pargs)
 
-    if args.recalc:
-        weights.unlink()
     src_grd = get_masterblend_grid(fn)
     dst_grd = get_nwm_grid(args.nwm_grid)
 
     ncpus = min(cpu_count(), args.pool)
-    with ProcessPoolExecutor(max_workers=ncpus, initializer=worker_load_weights, initargs=(src_grd, dst_grd, weights)) as executor:
+    with ProcessPoolExecutor(max_workers=ncpus, initializer=worker_load_weights, initargs=(src_grd, dst_grd, weights, args.recalc)) as executor:
         print("Initialized pool with", ncpus, "processes")
         tasks = []
-        for i, args in enumerate(piargs):
+        for args in piargs:
             fut = executor.submit(regrid, *args)
             tasks.append(fut)
 
