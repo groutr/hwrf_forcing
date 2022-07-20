@@ -28,7 +28,7 @@ REGRIDDER = None
 def worker_load_weights(src, dst, weights, force_recalc):
     global REGRIDDER
         
-    if weights and not force_recalc:
+    if weights and weights.is_file() and not force_recalc:
         print("Worker loading weights...")
         REGRIDDER = xe.Regridder(src, dst, 'bilinear', reuse_weights=True, weights=weights)
     else:
@@ -97,10 +97,7 @@ def get_options():
     parser.add_argument('--recalc', action='store_true', help='Force recalculation of weights')
     args = parser.parse_args()
     if args.weights:
-        if args.weights.is_file():
-            args.weights = args.weights.resolve()
-        else:
-            raise RuntimeError("Weights must point to a file")
+        args.weights = args.weights.resolve()
     args.output = args.output.resolve()
     return args
 
